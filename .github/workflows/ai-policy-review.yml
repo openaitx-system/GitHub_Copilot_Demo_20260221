@@ -79,7 +79,7 @@ jobs:
   copilot-review:
     name: Copilot Code Review
     runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && vars.ENABLE_COPILOT_CODE_REVIEW == 'true'
     permissions:
       contents: read
       pull-requests: write
