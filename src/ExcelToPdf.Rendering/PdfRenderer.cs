@@ -176,6 +176,10 @@ public class PdfRenderer : IPdfRenderer
         WorksheetData worksheet,
         ConversionOptions options)
     {
+        var totalTableWidth = GetTotalTableWidth(worksheet);
+        var availableWidth = GetAvailableContentWidth(options);
+        var shouldFitToPage = totalTableWidth > availableWidth && totalTableWidth > 0;
+
         container.Table(table =>
         {
             // Define columns
@@ -186,7 +190,15 @@ public class PdfRenderer : IPdfRenderer
                 {
                     var widthInChars = worksheet.GetColumnWidth(col);
                     var widthInPoints = (float)(widthInChars * CharacterWidthInPoints);
-                    columns.ConstantColumn(widthInPoints);
+
+                    if (shouldFitToPage)
+                    {
+                        columns.RelativeColumn(Math.Max(widthInPoints, 1f));
+                    }
+                    else
+                    {
+                        columns.ConstantColumn(widthInPoints);
+                    }
                 }
             });
 
@@ -200,6 +212,7 @@ public class PdfRenderer : IPdfRenderer
                     table.Cell()
                         .Row((uint)(row + 1))
                         .Column((uint)(col + 1))
+                        .MinHeight((float)worksheet.GetRowHeight(row))
                         .Border(0.5f)
                         .BorderColor(Colors.Grey.Lighten2)
                         .Padding(CellPadding)
@@ -267,6 +280,16 @@ public class PdfRenderer : IPdfRenderer
     /// </summary>
     private static IContainer ApplyAlignment(IContainer container, CellValue cellValue)
     {
+        // Horizontal alignment
+        container = cellValue.HorizontalAlignment switch
+        {
+            Core.Models.HorizontalAlignment.Left => container.AlignLeft(),
+            Core.Models.HorizontalAlignment.Center => container.AlignCenter(),
+            Core.Models.HorizontalAlignment.Right => container.AlignRight(),
+            Core.Models.HorizontalAlignment.Justify => container.AlignLeft(),
+            _ => container.AlignLeft()
+        };
+
         // Vertical alignment
         container = cellValue.VerticalAlignment switch
         {
@@ -277,6 +300,43 @@ public class PdfRenderer : IPdfRenderer
         };
 
         return container;
+    }
+
+    /// <summary>
+    /// Calculates total table width in points from worksheet column widths.
+    /// </summary>
+    private static float GetTotalTableWidth(WorksheetData worksheet)
+    {
+        float totalWidth = 0;
+        for (int col = 0; col < worksheet.ColumnCount; col++)
+        {
+            var widthInChars = worksheet.GetColumnWidth(col);
+            totalWidth += (float)(widthInChars * CharacterWidthInPoints);
+        }
+
+        return totalWidth;
+    }
+
+    /// <summary>
+    /// Gets available content width in points based on page size and margins.
+    /// </summary>
+    private static float GetAvailableContentWidth(ConversionOptions options)
+    {
+        var (pageWidth, pageHeight) = options.PageSize switch
+        {
+            Core.Models.PageSize.A4 => (595.28f, 841.89f),
+            Core.Models.PageSize.Letter => (612f, 792f),
+            Core.Models.PageSize.A3 => (841.89f, 1190.55f),
+            Core.Models.PageSize.Legal => (612f, 1008f),
+            _ => (595.28f, 841.89f)
+        };
+
+        var effectivePageWidth = options.Orientation == PageOrientation.Landscape
+            ? pageHeight
+            : pageWidth;
+
+        var contentWidth = effectivePageWidth - options.MarginLeft - options.MarginRight;
+        return Math.Max(contentWidth, 50f);
     }
 
     /// <summary>
