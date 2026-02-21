@@ -1,0 +1,55 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'benchmarks/**'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build Release
+        run: dotnet build -c Release --no-restore
+
+      - name: Run Benchmarks
+        run: |
+          cd benchmarks/ExcelToPdf.Benchmarks
+          dotnet run -c Release -- --filter '*' --exporters json
+        continue-on-error: true
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: benchmarks/ExcelToPdf.Benchmarks/BenchmarkDotNet.Artifacts/
+          retention-days: 30
+
+      - name: Comment Benchmark Summary
+        if: github.event_name == 'push'
+        run: |
+          echo "## Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "benchmarks/ExcelToPdf.Benchmarks/BenchmarkDotNet.Artifacts/results/ExcelToPdf.Benchmarks.ConversionBenchmarks-report-github.md" ]; then
+            cat "benchmarks/ExcelToPdf.Benchmarks/BenchmarkDotNet.Artifacts/results/ExcelToPdf.Benchmarks.ConversionBenchmarks-report-github.md" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Benchmark report not found. Check the benchmark run logs." >> $GITHUB_STEP_SUMMARY
+          fi
