@@ -76,21 +76,3 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  copilot-review:
-    name: Copilot Code Review
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false && vars.ENABLE_COPILOT_CODE_REVIEW == 'true'
-    permissions:
-      contents: read
-      pull-requests: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: GitHub Copilot Code Review
-        uses: github/copilot-code-review@v1
-        with:
-          # Copilot will review the PR diff and post suggestions
-          # It uses .github/copilot-instructions.md for context
-          model: gpt-4o
