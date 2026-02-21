@@ -319,7 +319,7 @@ public class PdfRendererTests
     }
 
     [Fact]
-    public async Task RenderAsync_WideTable_FitsToPageWithoutException()
+    public async Task RenderAsync_WideTable_FitsToPageWithoutExceptionAsync()
     {
         // Arrange
         var worksheet = new WorksheetData
@@ -365,7 +365,7 @@ public class PdfRendererTests
     [InlineData(HorizontalAlignment.Center)]
     [InlineData(HorizontalAlignment.Right)]
     [InlineData(HorizontalAlignment.Justify)]
-    public async Task RenderAsync_HorizontalAlignments_GeneratePdf(HorizontalAlignment alignment)
+    public async Task RenderAsync_HorizontalAlignments_GeneratePdfAsync(HorizontalAlignment alignment)
     {
         // Arrange
         var worksheet = new WorksheetData
@@ -400,7 +400,7 @@ public class PdfRendererTests
     }
 
     [Fact]
-    public async Task RenderAsync_CustomRowHeights_GeneratePdf()
+    public async Task RenderAsync_CustomRowHeights_GeneratePdfAsync()
     {
         // Arrange
         var worksheet = new WorksheetData
