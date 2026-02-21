@@ -1,0 +1,57 @@
+name: Commit Message Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-commits:
+    name: Validate Commit Messages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commit messages
+        id: check
+        run: |
+          ERRORS=""
+          COMMITS=$(git log origin/main..HEAD --pretty=format:"%H %s" 2>/dev/null || git log --pretty=format:"%H %s" -10)
+
+          while IFS= read -r line; do
+            HASH=$(echo "$line" | cut -d' ' -f1)
+            MSG=$(echo "$line" | cut -d' ' -f2-)
+            SHORT_HASH=$(echo "$HASH" | cut -c1-7)
+
+            # Check conventional commit format: type(scope): description
+            if ! echo "$MSG" | grep -qP '^(feat|fix|docs|style|refactor|perf|test|chore)(\([a-z]+\))?: .+'; then
+              ERRORS="$ERRORS\n- \`$SHORT_HASH\`: \"$MSG\" — Does not follow conventional commit format"
+            fi
+
+            # Check max length
+            if [ ${#MSG} -gt 72 ]; then
+              ERRORS="$ERRORS\n- \`$SHORT_HASH\`: Subject line exceeds 72 characters (${#MSG} chars)"
+            fi
+          done <<< "$COMMITS"
+
+          if [ -n "$ERRORS" ]; then
+            echo "has_errors=true" >> $GITHUB_OUTPUT
+            echo -e "## ⚠️ Commit Message Issues\n\nThe following commits don't follow the [conventional commit format](https://github.com/openaitx-system/GitHub_Copilot_Demo_20260221/wiki/Git-Workflow-Standards#2-commit-message-format):\n$ERRORS\n\n**Expected format**: \`type(scope): description\`\n\nTypes: feat, fix, docs, style, refactor, perf, test, chore\nScopes: excel, pdf, core, tests, ci, docs" > commit_check.md
+          else
+            echo "has_errors=false" >> $GITHUB_OUTPUT
+            echo "## ✅ Commit Messages\n\nAll commit messages follow conventional format." > commit_check.md
+          fi
+
+      - name: Post comment
+        if: steps.check.outputs.has_errors == 'true'
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body-file commit_check.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

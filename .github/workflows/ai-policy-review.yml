@@ -1,0 +1,96 @@
+name: AI Policy Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+jobs:
+  ai-policy-review:
+    name: AI Policy Review
+    runs-on: ubuntu-latest
+    # Skip for draft PRs or docs-only changes
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if docs-only change
+        id: check-docs
+        run: |
+          CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+          NON_DOC_FILES=$(echo "$CHANGED_FILES" | grep -v '\.md$' | grep -v 'docs/' | grep -v 'wiki/' || true)
+          if [ -z "$NON_DOC_FILES" ]; then
+            echo "docs_only=true" >> $GITHUB_OUTPUT
+            echo "Only documentation changes detected. Skipping code review."
+          else
+            echo "docs_only=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check skip label
+        id: check-skip
+        run: |
+          LABELS=$(gh pr view ${{ github.event.pull_request.number }} --json labels --jq '.labels[].name')
+          if echo "$LABELS" | grep -q "skip-ai-review"; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get PR diff
+        if: steps.check-docs.outputs.docs_only == 'false' && steps.check-skip.outputs.skip == 'false'
+        id: get-diff
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} > pr_diff.txt
+          echo "diff_size=$(wc -c < pr_diff.txt)" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run policy validation
+        if: steps.check-docs.outputs.docs_only == 'false' && steps.check-skip.outputs.skip == 'false'
+        id: validate
+        run: |
+          python3 .github/scripts/validate-policy.py \
+            --diff pr_diff.txt \
+            --policies docs/wiki/ \
+            --output review_result.md
+        continue-on-error: true
+
+      - name: Post review comment
+        if: steps.check-docs.outputs.docs_only == 'false' && steps.check-skip.outputs.skip == 'false'
+        run: |
+          if [ -f review_result.md ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body-file review_result.md
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  copilot-review:
+    name: Copilot Code Review
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: GitHub Copilot Code Review
+        uses: github/copilot-code-review@v1
+        with:
+          # Copilot will review the PR diff and post suggestions
+          # It uses .github/copilot-instructions.md for context
+          model: gpt-4o
