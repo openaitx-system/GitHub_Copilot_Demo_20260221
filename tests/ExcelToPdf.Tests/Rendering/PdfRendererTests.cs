@@ -318,6 +318,118 @@ public class PdfRendererTests
         stream.Length.Should().BeGreaterThan(0);
     }
 
+    [Fact]
+    public async Task RenderAsync_WideTable_FitsToPageWithoutExceptionAsync()
+    {
+        // Arrange
+        var worksheet = new WorksheetData
+        {
+            Name = "WideTable",
+            RowCount = 2,
+            ColumnCount = 20
+        };
+
+        for (int col = 0; col < worksheet.ColumnCount; col++)
+        {
+            worksheet.ColumnWidths[col] = 40;
+            worksheet.Cells[(0, col)] = new CellValue
+            {
+                Row = 0,
+                Column = col,
+                DisplayValue = $"Header {col + 1}",
+                DataType = CellDataType.String,
+                IsBold = true
+            };
+            worksheet.Cells[(1, col)] = new CellValue
+            {
+                Row = 1,
+                Column = col,
+                DisplayValue = $"Value {col + 1}",
+                DataType = CellDataType.String
+            };
+        }
+
+        var worksheets = new List<WorksheetData> { worksheet };
+        using var stream = new MemoryStream();
+        var options = new ConversionOptions();
+
+        // Act
+        await _renderer.RenderAsync(worksheets, stream, options);
+
+        // Assert
+        stream.Length.Should().BeGreaterThan(0);
+    }
+
+    [Theory]
+    [InlineData(HorizontalAlignment.Left)]
+    [InlineData(HorizontalAlignment.Center)]
+    [InlineData(HorizontalAlignment.Right)]
+    [InlineData(HorizontalAlignment.Justify)]
+    public async Task RenderAsync_HorizontalAlignments_GeneratePdfAsync(HorizontalAlignment alignment)
+    {
+        // Arrange
+        var worksheet = new WorksheetData
+        {
+            Name = "Alignment",
+            RowCount = 1,
+            ColumnCount = 1,
+            Cells = new Dictionary<(int Row, int Column), CellValue>
+            {
+                {
+                    (0, 0), new CellValue
+                    {
+                        Row = 0,
+                        Column = 0,
+                        DisplayValue = "Aligned",
+                        DataType = CellDataType.String,
+                        HorizontalAlignment = alignment
+                    }
+                }
+            }
+        };
+
+        var worksheets = new List<WorksheetData> { worksheet };
+        using var stream = new MemoryStream();
+        var options = new ConversionOptions();
+
+        // Act
+        await _renderer.RenderAsync(worksheets, stream, options);
+
+        // Assert
+        stream.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task RenderAsync_CustomRowHeights_GeneratePdfAsync()
+    {
+        // Arrange
+        var worksheet = new WorksheetData
+        {
+            Name = "RowHeights",
+            RowCount = 3,
+            ColumnCount = 1,
+            Cells = new Dictionary<(int Row, int Column), CellValue>
+            {
+                { (0, 0), new CellValue { Row = 0, Column = 0, DisplayValue = "Short", DataType = CellDataType.String } },
+                { (1, 0), new CellValue { Row = 1, Column = 0, DisplayValue = "Medium", DataType = CellDataType.String } },
+                { (2, 0), new CellValue { Row = 2, Column = 0, DisplayValue = "Tall", DataType = CellDataType.String } }
+            }
+        };
+        worksheet.RowHeights[0] = 15;
+        worksheet.RowHeights[1] = 30;
+        worksheet.RowHeights[2] = 45;
+
+        var worksheets = new List<WorksheetData> { worksheet };
+        using var stream = new MemoryStream();
+        var options = new ConversionOptions();
+
+        // Act
+        await _renderer.RenderAsync(worksheets, stream, options);
+
+        // Assert
+        stream.Length.Should().BeGreaterThan(0);
+    }
+
     /// <summary>
     /// Helper to create a simple worksheet with string cells.
     /// </summary>
