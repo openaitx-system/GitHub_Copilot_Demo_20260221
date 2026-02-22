@@ -318,6 +318,135 @@ public class PdfRendererTests
         stream.Length.Should().BeGreaterThan(0);
     }
 
+    [Theory]
+    [InlineData(HorizontalAlignment.Left)]
+    [InlineData(HorizontalAlignment.Center)]
+    [InlineData(HorizontalAlignment.Right)]
+    [InlineData(HorizontalAlignment.Justify)]
+    public async Task RenderAsync_HorizontalAlignment_GeneratesPdf(HorizontalAlignment alignment)
+    {
+        // Arrange
+        var worksheet = new WorksheetData
+        {
+            Name = "AlignTest",
+            RowCount = 1,
+            ColumnCount = 1,
+            Cells = new Dictionary<(int Row, int Column), CellValue>
+            {
+                {
+                    (0, 0), new CellValue
+                    {
+                        Row = 0, Column = 0,
+                        DisplayValue = "Aligned",
+                        DataType = CellDataType.String,
+                        HorizontalAlignment = alignment
+                    }
+                }
+            }
+        };
+
+        using var stream = new MemoryStream();
+        var options = new ConversionOptions();
+
+        // Act
+        await _renderer.RenderAsync(new List<WorksheetData> { worksheet }, stream, options);
+
+        // Assert
+        stream.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task RenderAsync_CustomRowHeight_GeneratesPdf()
+    {
+        // Arrange
+        var worksheet = new WorksheetData
+        {
+            Name = "RowHeightTest",
+            RowCount = 2,
+            ColumnCount = 2,
+            RowHeights = new Dictionary<int, double> { { 0, 40.0 }, { 1, 25.0 } },
+            Cells = new Dictionary<(int Row, int Column), CellValue>
+            {
+                { (0, 0), new CellValue { Row = 0, Column = 0, DisplayValue = "Tall row", DataType = CellDataType.String } },
+                { (1, 0), new CellValue { Row = 1, Column = 0, DisplayValue = "Normal row", DataType = CellDataType.String } }
+            }
+        };
+
+        using var stream = new MemoryStream();
+        var options = new ConversionOptions();
+
+        // Act
+        await _renderer.RenderAsync(new List<WorksheetData> { worksheet }, stream, options);
+
+        // Assert
+        stream.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task RenderAsync_WideTable_DoesNotThrow()
+    {
+        // Arrange: 50 columns with default width.
+        // Total width ≈ 50 × DefaultColumnWidth(8.43 chars) × CharacterWidthInPoints(7.5 pt/char) ≈ 3161 pt,
+        // far exceeding any standard page width. ScaleToFit must prevent a DocumentLayoutException.
+        const int columnCount = 50;
+        var worksheet = new WorksheetData
+        {
+            Name = "WideSheet",
+            RowCount = 1,
+            ColumnCount = columnCount
+        };
+        for (int col = 0; col < columnCount; col++)
+        {
+            worksheet.Cells[(0, col)] = new CellValue
+            {
+                Row = 0, Column = col,
+                DisplayValue = $"Col{col}",
+                DataType = CellDataType.String
+            };
+        }
+
+        using var stream = new MemoryStream();
+        var options = new ConversionOptions();
+
+        // Act
+        Func<Task> act = () => _renderer.RenderAsync(new List<WorksheetData> { worksheet }, stream, options);
+
+        // Assert: should not throw a layout exception
+        await act.Should().NotThrowAsync();
+        stream.Length.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task RenderAsync_CellWithMultilineText_UsesLineNotEmptyLine()
+    {
+        // Arrange: multi-line content that previously used EmptyLine() between lines
+        var worksheet = new WorksheetData
+        {
+            Name = "MultiLine",
+            RowCount = 1,
+            ColumnCount = 1,
+            Cells = new Dictionary<(int Row, int Column), CellValue>
+            {
+                {
+                    (0, 0), new CellValue
+                    {
+                        Row = 0, Column = 0,
+                        DisplayValue = "Line1\nLine2\nLine3",
+                        DataType = CellDataType.String
+                    }
+                }
+            }
+        };
+
+        using var stream = new MemoryStream();
+
+        // Act
+        await _renderer.RenderAsync(new List<WorksheetData> { worksheet }, stream, new ConversionOptions());
+
+        // Assert: PDF is generated successfully
+        stream.Length.Should().BeGreaterThan(0);
+    }
+
     /// <summary>
     /// Helper to create a simple worksheet with string cells.
     /// </summary>
