@@ -32,6 +32,23 @@ public class PdfRenderer : IPdfRenderer
     private const float CellPadding = 2f;
 
     /// <summary>
+    /// Page dimension constants in points (portrait width, portrait height).
+    /// Values match the standard ISO and ANSI paper sizes.
+    /// Ref: Wiki/PDF-Specification#Page-Sizes
+    /// </summary>
+    private static readonly Dictionary<Core.Models.PageSize, (float Width, float Height)> PageDimensions = new()
+    {
+        // A4  = 210 mm × 297 mm  → 595.28 pt × 841.89 pt
+        { Core.Models.PageSize.A4,     (595.28f, 841.89f) },
+        // Letter = 8.5 in × 11 in → 612 pt × 792 pt
+        { Core.Models.PageSize.Letter, (612f,    792f)    },
+        // A3  = 297 mm × 420 mm  → 841.89 pt × 1190.55 pt
+        { Core.Models.PageSize.A3,     (841.89f, 1190.55f) },
+        // Legal = 8.5 in × 14 in → 612 pt × 1008 pt
+        { Core.Models.PageSize.Legal,  (612f,    1008f)   },
+    };
+
+    /// <summary>
     /// Initializes a new instance of <see cref="PdfRenderer"/>.
     /// </summary>
     /// <param name="logger">The logger instance.</param>
@@ -169,6 +186,7 @@ public class PdfRenderer : IPdfRenderer
 
     /// <summary>
     /// Renders the worksheet data as a table.
+    /// Applies wide-table overflow protection and custom row heights.
     /// Ref: Wiki/PDF-Specification#Cell-Rendering
     /// </summary>
     private void RenderTable(
@@ -176,16 +194,28 @@ public class PdfRenderer : IPdfRenderer
         WorksheetData worksheet,
         ConversionOptions options)
     {
-        container.Table(table =>
+        // Calculate total column width in points
+        // Ref: Wiki/Excel-Specification#Row-and-Column-Sizing
+        var totalWidthInPoints = 0f;
+        for (int col = 0; col < worksheet.ColumnCount; col++)
         {
-            // Define columns
-            // Ref: Wiki/Excel-Specification#Row-and-Column-Sizing
+            totalWidthInPoints += (float)(worksheet.GetColumnWidth(col) * CharacterWidthInPoints);
+        }
+
+        // Wide-table overflow protection: scale the container to fit the available area
+        var availableWidth = GetAvailableContentWidth(options);
+        IContainer tableContainer = totalWidthInPoints > availableWidth
+            ? container.ScaleToFit()
+            : container;
+
+        tableContainer.Table(table =>
+        {
+            // Define columns (original widths; ScaleToFit handles the resize when needed)
             table.ColumnsDefinition(columns =>
             {
                 for (int col = 0; col < worksheet.ColumnCount; col++)
                 {
-                    var widthInChars = worksheet.GetColumnWidth(col);
-                    var widthInPoints = (float)(widthInChars * CharacterWidthInPoints);
+                    var widthInPoints = (float)(worksheet.GetColumnWidth(col) * CharacterWidthInPoints);
                     columns.ConstantColumn(widthInPoints);
                 }
             });
@@ -193,31 +223,57 @@ public class PdfRenderer : IPdfRenderer
             // Render cells
             for (int row = 0; row < worksheet.RowCount; row++)
             {
+                var hasCustomRowHeight = worksheet.RowHeights.TryGetValue(row, out var rowHeight);
+
                 for (int col = 0; col < worksheet.ColumnCount; col++)
                 {
                     var hasCell = worksheet.Cells.TryGetValue((row, col), out var cellValue);
 
-                    table.Cell()
+                    var cell = table.Cell()
                         .Row((uint)(row + 1))
                         .Column((uint)(col + 1))
                         .Border(0.5f)
                         .BorderColor(Colors.Grey.Lighten2)
-                        .Padding(CellPadding)
-                        .Element(cellContainer =>
+                        .Padding(CellPadding);
+
+                    // Apply custom row height via the first cell of each row.
+                    // QuestPDF propagates MinHeight to all cells in the same row automatically,
+                    // so setting it once on col 0 is sufficient and avoids redundant constraints.
+                    // Ref: Wiki/Excel-Specification#Row-and-Column-Sizing
+                    IContainer cellElement = col == 0 && hasCustomRowHeight
+                        ? cell.MinHeight((float)rowHeight)
+                        : cell;
+
+                    cellElement.Element(cellContainer =>
+                    {
+                        if (hasCell && cellValue is not null)
                         {
-                            if (hasCell && cellValue is not null)
-                            {
-                                RenderCellContent(cellContainer, cellValue, options);
-                            }
-                        });
+                            RenderCellContent(cellContainer, cellValue, options);
+                        }
+                    });
                 }
             }
         });
     }
 
     /// <summary>
+    /// Returns the available content width in points for the given page size, orientation, and margins.
+    /// Ref: Wiki/PDF-Specification#Page-Layout
+    /// </summary>
+    private static float GetAvailableContentWidth(ConversionOptions options)
+    {
+        if (!PageDimensions.TryGetValue(options.PageSize, out var dims))
+        {
+            dims = PageDimensions[Core.Models.PageSize.A4];
+        }
+
+        var pageWidth = options.Orientation == PageOrientation.Landscape ? dims.Height : dims.Width;
+        return pageWidth - options.MarginLeft - options.MarginRight;
+    }
+
+    /// <summary>
     /// Renders the content of a single cell.
-    /// Handles text formatting and line breaks.
+    /// Handles text formatting, alignment, and line breaks.
     /// Ref: Wiki/PDF-Specification#Text-Rendering
     /// </summary>
     private void RenderCellContent(
@@ -239,6 +295,24 @@ public class PdfRenderer : IPdfRenderer
         // Ref: Wiki/PDF-Specification#Text-Rendering — Line Break Rendering
         container.Text(text =>
         {
+            // Apply text alignment within the block
+            // Ref: Wiki/Excel-Specification#Cell-Alignment
+            switch (cellValue.HorizontalAlignment)
+            {
+                case Core.Models.HorizontalAlignment.Center:
+                    text.AlignCenter();
+                    break;
+                case Core.Models.HorizontalAlignment.Right:
+                    text.AlignRight();
+                    break;
+                case Core.Models.HorizontalAlignment.Justify:
+                    text.Justify();
+                    break;
+                default:
+                    text.AlignLeft();
+                    break;
+            }
+
             var displayValue = cellValue.DisplayValue;
 
             // Handle line breaks
@@ -247,15 +321,16 @@ public class PdfRenderer : IPdfRenderer
 
             for (int i = 0; i < lines.Length; i++)
             {
-                var span = text.Span(lines[i]);
-
-                // Apply font styling
-                ApplyFontStyle(span, cellValue, options);
-
-                // Add line break between lines (not after last)
+                // Use Line() for all but the last segment to emit a newline without an empty paragraph
                 if (i < lines.Length - 1)
                 {
-                    text.EmptyLine();
+                    var span = text.Line(lines[i]);
+                    ApplyFontStyle(span, cellValue, options);
+                }
+                else
+                {
+                    var span = text.Span(lines[i]);
+                    ApplyFontStyle(span, cellValue, options);
                 }
             }
         });
@@ -274,6 +349,17 @@ public class PdfRenderer : IPdfRenderer
             Core.Models.VerticalAlignment.Middle => container.AlignMiddle(),
             Core.Models.VerticalAlignment.Bottom => container.AlignBottom(),
             _ => container.AlignBottom()
+        };
+
+        // Horizontal alignment
+        // Ref: Wiki/PDF-Specification#Cell-Rendering
+        container = cellValue.HorizontalAlignment switch
+        {
+            Core.Models.HorizontalAlignment.Left => container.AlignLeft(),
+            Core.Models.HorizontalAlignment.Center => container.AlignCenter(),
+            Core.Models.HorizontalAlignment.Right => container.AlignRight(),
+            Core.Models.HorizontalAlignment.Justify => container.AlignLeft(),
+            _ => container.AlignLeft()
         };
 
         return container;
