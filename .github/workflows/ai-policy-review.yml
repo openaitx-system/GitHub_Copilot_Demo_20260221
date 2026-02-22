@@ -75,7 +75,9 @@ jobs:
           python3 .github/scripts/github-ai-review.py \
             --diff pr_diff.txt \
             --policies docs/wiki/ \
-            --output ai_review_result.md
+            --output ai_review_result.md \
+            --fail-on-ai-error \
+            --fail-on-high
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_MODELS_MODEL: ${{ vars.GITHUB_MODELS_MODEL || 'gpt-4.1-mini' }}
@@ -99,6 +101,10 @@ jobs:
         run: |
           if [ "${{ steps.validate.outcome }}" = "failure" ]; then
             echo "Policy validation failed. Failing CI gate."
+            exit 1
+          fi
+          if [ "${{ steps.ai-review.outcome }}" = "failure" ]; then
+            echo "GitHub AI review failed or reported HIGH severity. Failing CI gate."
             exit 1
           fi
 
