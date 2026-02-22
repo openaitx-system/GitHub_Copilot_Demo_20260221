@@ -75,7 +75,9 @@ jobs:
           python3 .github/scripts/github-ai-review.py \
             --diff pr_diff.txt \
             --policies docs/wiki/ \
-            --output ai_review_result.md
+            --output ai_review_result.md \
+            --fail-on-ai-error \
+            --fail-on-high
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_MODELS_MODEL: ${{ vars.GITHUB_MODELS_MODEL || 'gpt-4.1-mini' }}
@@ -83,7 +85,7 @@ jobs:
         continue-on-error: true
 
       - name: Post review comment
-        if: steps.check-docs.outputs.docs_only == 'false' && steps.check-skip.outputs.skip == 'false'
+        if: always() && steps.check-docs.outputs.docs_only == 'false' && steps.check-skip.outputs.skip == 'false'
         run: |
           if [ -f review_result.md ]; then
             gh pr comment ${{ github.event.pull_request.number }} --body-file review_result.md
@@ -93,5 +95,17 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enforce policy gate
+        if: always() && steps.check-docs.outputs.docs_only == 'false' && steps.check-skip.outputs.skip == 'false'
+        run: |
+          if [ "${{ steps.validate.outcome }}" = "failure" ]; then
+            echo "Policy validation failed. Failing CI gate."
+            exit 1
+          fi
+          if [ "${{ steps.ai-review.outcome }}" = "failure" ]; then
+            echo "GitHub AI review failed or reported HIGH severity. Failing CI gate."
+            exit 1
+          fi
 
  

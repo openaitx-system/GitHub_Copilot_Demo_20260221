@@ -151,6 +151,8 @@ def main() -> None:
     parser.add_argument("--diff", required=True, help="Path to the diff file")
     parser.add_argument("--policies", required=True, help="Path to policies directory")
     parser.add_argument("--output", required=True, help="Path to output markdown file")
+    parser.add_argument("--fail-on-ai-error", action="store_true", help="Exit with non-zero code if AI request fails")
+    parser.add_argument("--fail-on-high", action="store_true", help="Exit with non-zero code when review contains [HIGH]")
     args = parser.parse_args()
 
     diff_path = Path(args.diff)
@@ -169,6 +171,7 @@ def main() -> None:
     diff_text = truncate_diff(diff_path.read_text(encoding="utf-8"))
     policy_text = read_policy_snippets(args.policies)
     system_prompt, user_prompt = build_prompt(diff_text, policy_text)
+    ai_request_failed = False
 
     try:
         review_body = call_github_models(
@@ -181,6 +184,7 @@ def main() -> None:
             ],
         )
     except error.HTTPError as ex:
+        ai_request_failed = True
         detail = ex.read().decode("utf-8", errors="replace")
         review_body = (
             "AI review request failed.\n\n"
@@ -189,6 +193,7 @@ def main() -> None:
             f"- Detail: `{detail[:1000]}`\n"
         )
     except Exception as ex:
+        ai_request_failed = True
         review_body = (
             "AI review request failed.\n\n"
             f"- Endpoint: `{endpoint}`\n"
@@ -199,6 +204,14 @@ def main() -> None:
     Path(args.output).write_text(comment, encoding="utf-8")
 
     print(f"AI review output written to {args.output}")
+
+    if args.fail_on_ai_error and ai_request_failed:
+        print("AI request failed and fail-on-ai-error is enabled", file=sys.stderr)
+        sys.exit(1)
+
+    if args.fail_on_high and "[HIGH]" in review_body.upper():
+        print("HIGH severity finding detected by AI review", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -102,6 +102,7 @@ public class PdfRenderer : IPdfRenderer
         _logger.LogInformation(
             "Rendering worksheet {SheetName} ({RowCount}x{ColumnCount})",
             worksheet.Name, worksheet.RowCount, worksheet.ColumnCount);
+        Console.WriteLine($"Render debug: {worksheet.Name}");
 
         container.Page(page =>
         {
